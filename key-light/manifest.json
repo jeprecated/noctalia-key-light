@@ -1,0 +1,20 @@
+{
+  "id": "key-light",
+  "name": "Elgato Key Light",
+  "version": "0.1.0",
+  "author": "jmo",
+  "description": "Control an Elgato Key Light from the Noctalia bar.",
+  "entryPoints": {
+    "main": "Main.qml",
+    "barWidget": "BarWidget.qml"
+  },
+  "metadata": {
+    "defaultSettings": {
+      "host": "elgato-key-light-mk-2-1cf4.local",
+      "port": 9123,
+      "pollIntervalMs": 5000,
+      "minKelvin": 2900,
+      "maxKelvin": 7000
+    }
+  }
+}
