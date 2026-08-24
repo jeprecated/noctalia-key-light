@@ -10,11 +10,12 @@
   },
   "metadata": {
     "defaultSettings": {
-      "host": "elgato-key-light-mk-2-1cf4.local",
+      "host": "elgato-key-light.local",
       "port": 9123,
       "pollIntervalMs": 5000,
       "minKelvin": 2900,
-      "maxKelvin": 7000
+      "maxKelvin": 7000,
+      "warmthKelvin": 3200
     }
   }
 }

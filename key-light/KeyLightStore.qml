@@ -9,9 +9,10 @@ QtObject {
   property int temperature: 222
   property string error: ""
   readonly property int kelvin: Math.round(1000000 / temperature)
-  readonly property string endpoint: "http://" + setting("host", "elgato-key-light-mk-2-1cf4.local") + ":" + setting("port", 9123) + "/elgato/lights"
+  readonly property string endpoint: "http://" + setting("host", "elgato-key-light.local") + ":" + setting("port", 9123) + "/elgato/lights"
   readonly property int minKelvin: setting("minKelvin", 2900)
   readonly property int maxKelvin: setting("maxKelvin", 7000)
+  readonly property int warmthKelvin: setting("warmthKelvin", 3200)
 
   property Timer poller: Timer {
     interval: Math.max(1000, root.setting("pollIntervalMs", 5000))
@@ -41,7 +42,8 @@ QtObject {
 
   function setBrightness(value) {
     brightness = Math.max(0, Math.min(100, Math.round(value)))
-    setLight({"brightness": brightness})
+    on = true
+    setLight({"on": 1, "brightness": brightness})
   }
 
   function setKelvin(value) {

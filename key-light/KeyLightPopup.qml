@@ -45,13 +45,28 @@ PopupWindow {
         Text { anchors.verticalCenter: parent.verticalCenter; text: root.store && root.store.online ? "Connected" : "Offline"; color: root.store && root.store.online ? "#a6e3a1" : "#f38ba8" }
       }
 
-      Text { text: "Brightness  " + (root.store ? root.store.brightness : 0) + "%"; color: "#e5e1e6" }
+      Row {
+        width: parent.width
+        spacing: 6
+        Text { anchors.verticalCenter: parent.verticalCenter; text: "Brightness  " + (root.store ? root.store.brightness : 0) + "%"; color: "#e5e1e6"; width: parent.width - 70 }
+        Button { text: "−"; width: 32; enabled: root.store && root.store.online; onClicked: root.store.setBrightness(root.store.brightness - 5) }
+        Button { text: "+"; width: 32; enabled: root.store && root.store.online; onClicked: root.store.setBrightness(root.store.brightness + 5) }
+      }
       Slider {
         width: parent.width; from: 0; to: 100; stepSize: 1; value: root.store ? root.store.brightness : 0; enabled: root.store && root.store.online
         onPressedChanged: if (!pressed && root.store) root.store.setBrightness(value)
       }
 
-      Text { text: "Temperature  " + (root.store ? root.store.kelvin : 0) + " K"; color: "#e5e1e6" }
+      Row {
+        width: parent.width
+        Text { anchors.verticalCenter: parent.verticalCenter; text: "Temperature  " + (root.store ? root.store.kelvin : 0) + " K"; color: "#e5e1e6"; width: parent.width - warmButton.width }
+        Button {
+          id: warmButton
+          text: "Warm " + (root.store ? root.store.warmthKelvin : 3200) + " K"
+          enabled: root.store && root.store.online
+          onClicked: root.store.setKelvin(root.store.warmthKelvin)
+        }
+      }
       Slider {
         width: parent.width; from: root.store ? root.store.minKelvin : 2900; to: root.store ? root.store.maxKelvin : 7000; stepSize: 100; value: root.store ? root.store.kelvin : 4500; enabled: root.store && root.store.online
         onPressedChanged: if (!pressed && root.store) root.store.setKelvin(value)

@@ -17,4 +17,4 @@ devenv shell install-local
 
 Enable **Elgato Key Light** in Noctalia's plugin settings, then add `plugin:key-light` to the bar. Source changes are loaded from the symlink created by `install-local`.
 
-The default host is `elgato-key-light-mk-2-1cf4.local`. Change `host`, `port`, polling interval, or Kelvin limits in the plugin's `settings.json` if needed.
+The default host is `elgato-key-light.local`. Change `host`, `port`, polling interval, or Kelvin limits in the plugin's local `settings.json` if needed.
