@@ -12,7 +12,7 @@ Item {
   implicitWidth: 42
   implicitHeight: 32
 
-  KeyLightStore { id: store; pluginApi: root.pluginApi }
+  readonly property var store: pluginApi?.mainInstance?.store ?? null
 
   Rectangle {
     anchors.centerIn: parent
@@ -25,14 +25,15 @@ Item {
       anchors.centerIn: parent
       text: "☀"
       font.pixelSize: 18
-      color: !store.online ? "#7f849c" : store.on ? "#f9e2af" : "#cdd6f4"
-      opacity: store.on ? 1 : 0.72
+      color: !store?.online ? "#7f849c" : store.on ? "#f9e2af" : "#cdd6f4"
+      opacity: store?.on ? 1 : 0.72
     }
 
     MouseArea {
       id: mouse
       anchors.fill: parent
       hoverEnabled: true
+      enabled: root.store !== null
       acceptedButtons: Qt.LeftButton | Qt.RightButton
       onClicked: function(event) {
         if (event.button === Qt.RightButton) store.toggle()
@@ -46,7 +47,7 @@ Item {
 
   KeyLightPopup {
     id: popup
-    store: store
+    store: root.store
     anchorItem: root
     onCloseRequested: open = false
   }

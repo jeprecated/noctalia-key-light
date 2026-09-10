@@ -1,7 +1,7 @@
 {
   "id": "key-light",
   "name": "Elgato Key Light",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "author": "jmo",
   "description": "Control an Elgato Key Light from the Noctalia bar.",
   "entryPoints": {

@@ -5,6 +5,7 @@ jq -e '.id == "key-light" and .entryPoints.barWidget == "BarWidget.qml"' key-lig
 for file in key-light/*.qml; do
   qmlformat "$file" >/dev/null
 done
+python3 scripts/test-ipc.py
 if [[ ${KEY_LIGHT_LIVE_TEST:-0} == 1 ]]; then
   response=$(curl --fail --silent --show-error "http://${KEY_LIGHT_HOST:-elgato-key-light.local}:9123/elgato/lights")
   jq -e '.numberOfLights == 1 and (.lights | length) == 1' <<<"$response" >/dev/null
