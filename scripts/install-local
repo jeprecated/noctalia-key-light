@@ -1,7 +1,0 @@
-#!/usr/bin/env bash
-set -euo pipefail
-root=$(cd "$(dirname "$0")/.." && pwd)
-dest="${XDG_CONFIG_HOME:-$HOME/.config}/noctalia/plugins/key-light"
-mkdir -p "$(dirname "$dest")"
-ln -sfn "$root/key-light" "$dest"
-echo "Installed $dest -> $root/key-light"

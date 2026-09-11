@@ -6,8 +6,10 @@ devenv.local.yaml
 # direnv
 .direnv
 
-# Local plugin configuration
-key-light/settings.json
+# Consumer-owned configuration and Python cache
+studio-controls/settings.json
+__pycache__/
+*.pyc
 
 # pre-commit
 .pre-commit-config.yaml

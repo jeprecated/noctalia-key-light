@@ -1,0 +1,28 @@
+{
+  "backendCommand": ["studio-controls"],
+  "pollIntervalMs": 5000,
+  "devices": [
+    {"id": "camera", "type": "v4l2", "path": "/dev/v4l/by-id/usb-EXAMPLE-video-index0"},
+    {"id": "light", "type": "key-light", "url": "http://light.example:9123/elgato/lights"}
+  ],
+  "controls": [
+    {"id": "power", "device": "light", "control": "power", "group": "Light", "label": "Power"},
+    {"id": "lightBrightness", "device": "light", "control": "brightness", "group": "Light", "label": "Brightness", "unit": "%", "step": 5, "powerOnChange": true},
+    {"id": "lightTemperature", "device": "light", "control": "temperature", "group": "Light", "label": "Colour temperature", "unit": "K", "step": 100},
+    {"id": "autoExposure", "device": "camera", "control": "auto_exposure", "group": "Exposure", "label": "Automatic exposure", "toggleValues": [1, 3]},
+    {"id": "exposure", "device": "camera", "control": "exposure_time_absolute", "group": "Exposure", "label": "Exposure time", "display": "exposure100us", "slider": "log", "step": 10, "default": 167, "enabledWhen": {"control": "autoExposure", "equals": 1}},
+    {"id": "gain", "device": "camera", "control": "gain", "group": "Exposure", "label": "Gain", "step": 5},
+    {"id": "frequency", "device": "camera", "control": "power_line_frequency", "group": "Exposure", "label": "Anti-flicker"},
+    {"id": "autofocus", "device": "camera", "control": "focus_automatic_continuous", "group": "Focus", "label": "Autofocus"},
+    {"id": "focus", "device": "camera", "control": "focus_absolute", "group": "Focus", "label": "Focus", "step": 5, "enabledWhen": {"control": "autofocus", "equals": 0}}
+  ],
+  "actions": [
+    {"id": "lightToggle", "control": "power", "operation": "toggle"},
+    {"id": "lightUp", "control": "lightBrightness", "operation": "adjust", "value": 5},
+    {"id": "lightDown", "control": "lightBrightness", "operation": "adjust", "value": -5},
+    {"id": "autoExposureToggle", "control": "autoExposure", "operation": "toggle"},
+    {"id": "exposureUp", "control": "exposure", "operation": "adjust", "value": 10},
+    {"id": "exposureDown", "control": "exposure", "operation": "adjust", "value": -10}
+  ],
+  "bar": {"rightClickAction": "lightToggle", "scrollUpAction": "lightUp", "scrollDownAction": "lightDown"}
+}

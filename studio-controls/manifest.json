@@ -1,0 +1,9 @@
+{
+  "id": "studio-controls",
+  "name": "Studio Controls",
+  "version": "0.3.0",
+  "author": "jmo",
+  "description": "Declaratively configured local camera and Key Light controls.",
+  "entryPoints": {"main": "Main.qml", "barWidget": "BarWidget.qml"},
+  "metadata": {"defaultSettings": {"devices": [], "controls": [], "actions": [], "bar": {}}}
+}

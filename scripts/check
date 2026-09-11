@@ -1,13 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$(dirname "$0")/.."
-jq -e '.id == "key-light" and .entryPoints.barWidget == "BarWidget.qml"' key-light/manifest.json >/dev/null
-for file in key-light/*.qml; do
+export PYTHONDONTWRITEBYTECODE=1
+jq -e '.id == "studio-controls" and .entryPoints.main == "Main.qml" and .metadata.defaultSettings.devices == [] and .metadata.defaultSettings.controls == [] and .metadata.defaultSettings.actions == []' studio-controls/manifest.json >/dev/null
+for file in studio-controls/*.qml; do
   qmlformat "$file" >/dev/null
 done
-python3 scripts/test-ipc.py
-if [[ ${KEY_LIGHT_LIVE_TEST:-0} == 1 ]]; then
-  response=$(curl --fail --silent --show-error "http://${KEY_LIGHT_HOST:-elgato-key-light.local}:9123/elgato/lights")
-  jq -e '.numberOfLights == 1 and (.lights | length) == 1' <<<"$response" >/dev/null
-fi
-echo "checks passed"
+python3 -m unittest discover -s tests -p 'test_*.py' -v
+python3 tests/test_qml.py
+echo "Studio Controls checks passed (synthetic devices only)"
