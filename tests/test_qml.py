@@ -11,14 +11,21 @@ import tempfile
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from unittest.mock import patch
 from test_backend import ROOT, b, config
 
 requests = []
 light = {"on": 0, "brightness": 25, "temperature": 222}
+light_blocked = threading.Event()
+light_started = threading.Event()
+light_release = threading.Event()
 
 
 class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
+        if light_blocked.is_set():
+            light_started.set()
+            light_release.wait(timeout=5)
         self.respond()
 
     def do_PUT(self):
@@ -117,6 +124,14 @@ ShellRoot {
       else settings.devices[0].path = mode === "null" ? null : (mode === "empty" ? "" : CAMERA_PATH)
       root.api.pluginSettings = settings
       main.refresh()
+    }
+    function burst(): void { for (let i = 0; i < 40; i++) main.invoke("zoomIn") }
+    function invalidBurst(): void { main.adjustValue("pan", 1800); main.adjustValue("pan", 1800) }
+    function lightBurst(): void {
+      for (let i = 0; i < 20; i++) main.invoke("lightUp")
+      main.invoke("lightDown")
+      main.invoke("lightToggle")
+      main.invoke("lightToggle")
     }
     function shared(): bool { return widget.store === main.store }
     function brokenHelper(): void { root.api.pluginSettings = Object.assign({}, root.api.pluginSettings, {backendCommand: ["/no/such/studio-controls-helper"]}); main.refresh() }
@@ -231,6 +246,58 @@ ShellRoot {
                     assert requests[-1] == {"temperature": 312}
                     assert light["brightness"] == 25 and light["on"] == 1
                     assert warm["controls"][19]["value"] == round(1000000 / 312)
+                    # Hold a real fake-light HTTP request open: camera IPC and
+                    # readback must finish while the light worker is still busy.
+                    light_blocked.set()
+                    ipc("plugin:studio-controls", "invoke", "lightUp")
+                    assert light_started.wait(timeout=2), "Fake light request did not start"
+                    try:
+                        started = time.monotonic()
+                        ipc("plugin:studio-controls", "set", "zoom", "120")
+                        deadline = started + 1.5
+                        while time.monotonic() < deadline:
+                            current = json.loads(ipc("test", "state"))
+                            zoom = next(row for row in current["controls"] if row["id"] == "zoom")
+                            if zoom.get("value") == 120:
+                                break
+                            time.sleep(0.02)
+                        else:
+                            raise AssertionError("Camera IPC waited for the blocked light")
+                        assert current["busy"], "Light should still be blocked"
+                        print(f"Camera write/readback while light blocked: {time.monotonic() - started:.3f}s")
+                    finally:
+                        light_blocked.clear()
+                        light_release.set()
+                    settled()
+                    # The reverse direction also stays independent, including
+                    # contention from another CLI process holding the camera lock.
+                    with patch.dict(os.environ, {"XDG_RUNTIME_DIR": env["XDG_RUNTIME_DIR"]}), b.device_lock(cfg["devices"][0]):
+                        ipc("plugin:studio-controls", "invoke", "zoomIn")
+                        before_brightness = light["brightness"]
+                        ipc("plugin:studio-controls", "invoke", "lightUp")
+                        deadline = time.monotonic() + 1.5
+                        while light["brightness"] == before_brightness and time.monotonic() < deadline:
+                            time.sleep(0.02)
+                        assert light["brightness"] == before_brightness + 5, "Light waited for camera lock"
+                    settled()
+                    before_writes = len(writes.read_text().splitlines())
+                    ipc("test", "burst")
+                    settled()
+                    assert json.loads(state.read_text())["zoom_absolute"] == 161
+                    burst_writes = len(writes.read_text().splitlines()) - before_writes
+                    assert burst_writes <= 2, f"Dial burst produced {burst_writes} writes"
+                    print(f"40 same-direction dial turns: {burst_writes} writes, exact final value")
+                    before_writes = len(writes.read_text().splitlines())
+                    ipc("test", "invalidBurst")
+                    assert settled()["errors"]["request"]
+                    assert len(writes.read_text().splitlines()) == before_writes, "Invalid steps were combined into a valid write"
+                    before_requests = len(requests)
+                    ipc("test", "lightBurst")
+                    settled()
+                    assert light["brightness"] == 95 and light["on"] == 1, "Direction reversal or toggle ordering lost"
+                    assert len(requests) - before_requests <= 5
+                    ipc("plugin:studio-controls", "refresh")
+                    assert not settled()["errors"]
                     before = len(requests), len(writes.read_text().splitlines())
                     ipc("test", "close")
                     ipc("test", "open")

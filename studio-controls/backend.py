@@ -298,6 +298,7 @@ class Controller:
         self.devices = {d["id"]: d for d in config["devices"]}
         self.controls = {c["id"]: c for c in config["controls"]}
         self.actions = {a["id"]: a for a in config["actions"]}
+        self.readback = {}
 
     def row(self, control, all_meta):
         meta = all_meta.get(control["device"], {}).get(control["control"])
@@ -329,9 +330,14 @@ class Controller:
         return {**base, **meta, "enabled": bool(enabled and not error), "error": error, "uiStep": step, "text": text,
                 "hasDefault": "default" in control, "toggleValues": control.get("toggleValues")}
 
-    def snapshot(self):
-        values, errors = {}, {}
+    def snapshot(self, device_ids=None, known=None):
+        selected = set(self.devices if device_ids is None else device_ids)
+        if not selected <= self.devices.keys():
+            raise ControlError("Unknown configured device")
+        values, errors = dict(known or {}), {}
         for name, device in self.devices.items():
+            if name not in selected or name in values:
+                continue
             try:
                 require_configured(device)
                 with device_lock(device):
@@ -339,9 +345,10 @@ class Controller:
             except (ControlError, OSError) as error:
                 values[name] = {}
                 errors[name] = str(error)
-        return {"controls": [self.row(c, values) for c in self.controls.values()], "errors": errors}
+        return {"controls": [self.row(c, values) for c in self.controls.values() if c["device"] in selected], "errors": errors}
 
     def operate(self, control_id, operation, value=None):
+        self.readback = {}
         if control_id not in self.controls:
             raise ControlError("Unknown configured control")
         control = self.controls[control_id]
@@ -390,7 +397,8 @@ class Controller:
                     payload["on"] = 1
                 light_request(device, payload)
             # Always read hardware state back; never declare requested values authoritative.
-            return self.row(control, {control["device"]: discover(device)})
+            self.readback = {control["device"]: discover(device)}
+            return self.row(control, self.readback)
 
     def invoke(self, action_id):
         action = self.actions.get(action_id)
@@ -404,10 +412,12 @@ def main():
     source = parser.add_mutually_exclusive_group(required=True)
     source.add_argument("--config")
     source.add_argument("--config-json")
+    parser.add_argument("--device", help="Limit reads and returned controls to one configured device")
     parser.add_argument("command", choices=("status", "label", "invoke", "set", "adjust", "reset"))
     parser.add_argument("arguments", nargs="*")
     args = parser.parse_args()
     controller = None
+    selected = [] if args.device else None
     try:
         if args.config:
             with open(args.config) as handle:
@@ -420,13 +430,27 @@ def main():
         expected = {"status": 0, "label": 1, "invoke": 1, "reset": 1, "set": 2, "adjust": 2}[args.command]
         if len(args.arguments) != expected:
             raise ControlError("Incorrect command arguments")
+        if args.device:
+            if args.device not in controller.devices:
+                raise ControlError("Unknown configured device")
+            selected = [args.device]
+        if args.command != "status":
+            control_id = (controller.actions.get(args.arguments[0], {}).get("control")
+                          if args.command == "invoke" else args.arguments[0])
+            control = controller.controls.get(control_id)
+            if control is None:
+                raise ControlError("Unknown configured action" if args.command == "invoke" else "Unknown configured control")
+            if args.device and control["device"] != args.device:
+                raise ControlError("Control does not belong to selected device")
+            if args.command == "label":
+                selected = [control["device"]]
         if args.command == "invoke":
             controller.invoke(args.arguments[0])
         elif args.command in ("set", "adjust"):
             controller.operate(args.arguments[0], args.command, int(args.arguments[1]))
         elif args.command == "reset":
             controller.operate(args.arguments[0], "reset")
-        snapshot = controller.snapshot()
+        snapshot = controller.snapshot(selected, known=controller.readback)
         if args.command == "label":
             row = next((r for r in snapshot["controls"] if r["id"] == args.arguments[0]), None)
             if row is None:
@@ -442,9 +466,10 @@ def main():
             snapshot = {"controls": [], "errors": {}}
             if controller is not None:
                 try:
-                    snapshot = controller.snapshot()
+                    snapshot = controller.snapshot(selected)
                 except (ControlError, OSError, ValueError, TypeError) as snapshot_error:
-                    snapshot = {"controls": [controller.row(c, {}) for c in controller.controls.values()],
+                    snapshot = {"controls": [controller.row(c, {}) for c in controller.controls.values()
+                                             if selected is None or c["device"] in selected],
                                 "errors": {"snapshot": str(snapshot_error)}}
             snapshot["errors"]["request"] = str(error)
             print(json.dumps(snapshot))

@@ -104,6 +104,7 @@ Read-only commands:
 
 ```sh
 studio-controls --config /consumer/settings.json status
+studio-controls --config /consumer/settings.json --device camera status
 studio-controls --config /consumer/settings.json label exposure
 ```
 
@@ -111,7 +112,10 @@ studio-controls --config /consumer/settings.json label exposure
 `id`, `label`, `group`, `kind`, `value`, `text`, `min`, `max`, `step`, `uiStep`,
 `options:[{value,label}]`, `enabled`, and `error` when available. `label` prints the
 label and actual formatted value for a Stream Deck display; unavailability is
-explicit. Polling never sends notifications or performs writes.
+explicit. `label` reads only its control's device. Optional `--device ID` limits
+status/operation responses to that device and rejects operations targeting another
+device. Without it, status/operation responses include all devices. Polling never
+sends notifications or performs writes.
 
 Explicit device-changing commands, for operator use after configuration:
 
@@ -129,8 +133,14 @@ IPC also exposes `refresh` (read-only). QML passes its settings through
 supply secrets in plugin settings. Helpers use argv, never shell interpolation.
 Each external camera call/light request and lock acquisition is bounded to three
 seconds; failed writes are never retried implicitly. Writes are read back; device
-state, not optimistic GUI state, owns feedback. QML serializes actions with a
-bounded queue, and device locks cover concurrent CLI callers. Rejected operations
+state, not optimistic GUI state, owns feedback. The immediate response reuses the
+write's actual readback instead of discovering the device again. QML uses a
+bounded queue and scoped snapshots **per device**, so a slow light cannot hold up
+a camera action or its feedback (and vice versa). Device locks still serialize
+concurrent callers for the same device. Adjacent queued same-direction adjustments
+at a valid observed hardware step are combined; opposite turns, toggles and resets
+keep their order so limit clamping and mode changes retain their meaning.
+Rejected operations
 return a nonzero exit status and a fresh read-only snapshot with `errors.request`,
 so the panel retains its controls and current state. Invalid configuration has no
 usable snapshot and returns empty controls with an explicit request error.
@@ -159,6 +169,9 @@ contact a configured light, query the running Noctalia instance or install/activ
 anything. Tests cover all 17 synthetic C920e controls, flags, sparse menus, ranges,
 steps, defaults, auto/manual dependencies, concurrent processes, bounded failures,
 UI control construction/signals, shared state, configured IPC actions, and no
-writes on startup/open/reopen/refresh/reconnect. GUI rendering/input on a real
+writes on startup/open/reopen/refresh/reconnect. Latency regressions count requests,
+hold a fake light request open while camera IPC completes, hold the camera lock
+while light IPC completes, and verify exact clamping/toggle results with a bounded
+number of writes for dial bursts. GUI rendering/input on a real
 compositor, camera firmware behavior, competing applications and persistence
 across physical reconnect remain operator acceptance checks.

@@ -5,85 +5,92 @@ Item {
   id: root
   property var pluginApi: null
   readonly property var settings: pluginApi?.pluginSettings ?? ({})
-  property var controls: []
-  property var errors: ({})
-  property var pending: []
-  property bool requestActive: false
-  property bool received: false
-  property bool busy: requestActive
+  property var replies: ({})
+  property string requestError: ""
+  readonly property var controls: {
+    const rows = {}
+    for (const reply of Object.values(replies))
+      for (const row of reply.controls ?? []) rows[row.id] = row
+    return (settings.controls ?? []).filter(control => rows[control.id]).map(control => rows[control.id])
+  }
+  readonly property var errors: {
+    const result = {}
+    for (const reply of Object.values(replies)) Object.assign(result, reply.errors)
+    if (requestError) result.request = requestError
+    return result
+  }
+  readonly property var pending: {
+    let result = []
+    for (let i = 0; i < workers.count; i++) result = result.concat(workers.itemAt(i)?.pending ?? [])
+    return result
+  }
+  readonly property bool busy: {
+    for (let i = 0; i < workers.count; i++) if (workers.itemAt(i)?.requestActive) return true
+    return false
+  }
   readonly property alias store: root
 
+  function update(deviceId, result) {
+    const previous = replies[deviceId] ?? ({controls: []})
+    replies = Object.assign({}, replies, {[deviceId]: Object.assign({}, previous, result)})
+  }
   function enqueue(argv) {
-    if (pending.length >= 64) {
-      errors = ({request: "Too many pending actions"})
+    const control = (settings.controls ?? []).find(control => control.id === argv[1])
+    if (!control) { requestError = "Unknown configured control"; return }
+    for (let i = 0; i < workers.count; i++) {
+      const worker = workers.itemAt(i)
+      if (worker?.deviceId !== control.device) continue
+      requestError = ""
+      const row = controls.find(row => row.id === control.id)
+      worker.enqueue(argv, row?.enabled && row.kind === "int" ? row.step : 0)
       return
     }
-    pending = pending.concat([argv])
-    drain()
-  }
-  function drain() {
-    if (requestActive || runner.running || pending.length === 0) return
-    const next = pending[0]
-    pending = pending.slice(1)
-    const backend = settings.backendCommand ?? ["studio-controls"]
-    if (!Array.isArray(backend) || backend.length === 0 || backend.some(value => typeof value !== "string" || value.length === 0)) {
-      controls = []
-      errors = ({request: "backendCommand must be a nonempty argv array"})
-      pending = []
-      return
-    }
-    runner.command = backend.concat(["--config-json", JSON.stringify(settings)]).concat(next)
-    received = false
-    requestActive = true
-    runner.running = true
-  }
-  function finished() {
-    if (!requestActive || runner.running) return
-    requestActive = false
-    if (!received) {
-      controls = []
-      errors = ({request: "Studio Controls helper unavailable"})
-    }
-    drain()
+    requestError = "Unknown configured device"
   }
   function refresh() {
-    if (!requestActive && pending.length === 0) enqueue(["status"])
+    requestError = ""
+    for (let i = 0; i < workers.count; i++) workers.itemAt(i)?.refresh()
   }
-  function invoke(action) { if (action) enqueue(["invoke", action]) }
+  function invoke(actionId) {
+    const action = (settings.actions ?? []).find(action => action.id === actionId)
+    if (!action) { requestError = "Unknown configured action"; return }
+    // Resolve adjustments so identical dial events can be combined safely.
+    if (action.operation === "adjust") { adjustValue(action.control, action.value); return }
+    const control = (settings.controls ?? []).find(control => control.id === action.control)
+    if (!control) { requestError = "Unknown configured control"; return }
+    for (let i = 0; i < workers.count; i++) {
+      const worker = workers.itemAt(i)
+      if (worker?.deviceId !== control.device) continue
+      requestError = ""
+      worker.enqueue(["invoke", actionId], 0)
+      return
+    }
+    requestError = "Unknown configured device"
+  }
   function setValue(control, value) { enqueue(["set", control, String(value)]) }
   function adjustValue(control, delta) { enqueue(["adjust", control, String(delta)]) }
   function resetValue(control) { enqueue(["reset", control]) }
 
-  Process {
-    id: runner
-    stdout: StdioCollector {
-      onStreamFinished: {
-        root.received = true
-        try {
-          const result = JSON.parse(text)
-          if (!Array.isArray(result.controls) || !result.errors) throw new Error("Malformed helper response")
-          root.controls = result.controls
-          root.errors = result.errors
-        } catch (error) {
-          root.controls = []
-          root.errors = ({request: "Studio Controls helper unavailable"})
-        }
-      }
+  Repeater {
+    id: workers
+    model: root.settings.devices ?? []
+    delegate: DeviceQueue {
+      required property var modelData
+      deviceId: modelData.id
+      settings: root.settings
+      onCompleted: result => root.update(deviceId, result)
     }
-    onExited: (code, status) => { Qt.callLater(root.finished) }
-    onRunningChanged: if (!running) Qt.callLater(root.finished)
   }
   Timer {
     interval: Math.max(1000, root.settings.pollIntervalMs ?? 5000)
     running: true
     repeat: true
-    triggeredOnStart: true
     onTriggered: root.refresh()
   }
   IpcHandler {
     target: "plugin:studio-controls"
     function invoke(action: string): void { root.invoke(action) }
-    function set(control: string, value: string): void { root.enqueue(["set", control, value]) }
+    function set(control: string, value: string): void { root.setValue(control, value) }
     function refresh(): void { root.refresh() }
   }
 }
