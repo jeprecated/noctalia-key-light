@@ -1,4 +1,5 @@
 import importlib.util
+import io
 import json
 import os
 from pathlib import Path
@@ -143,7 +144,7 @@ class BackendTests(unittest.TestCase):
         self.assertFalse(self.writes.exists())
 
     def test_invalid_config_rejected_before_io(self):
-        for update in ({"path": "0"}, {"path": "/dev/camera\x00oops"}, {"type": "shell"}):
+        for update in ({"path": "0"}, {"path": "/dev/camera\x00oops"}, {"path": False}, {"path": 0}, {"path": []}, {"type": "shell"}):
             cfg = config()
             cfg["devices"][0].update(update)
             with self.assertRaises(b.ControlError):
@@ -153,6 +154,36 @@ class BackendTests(unittest.TestCase):
             cfg["controls"][0]["step"] = value
             with self.assertRaises(b.ControlError):
                 b.Controller(cfg)
+
+    def test_action_label_validation(self):
+        for value in ("", " \t", "Explicit action"):
+            cfg = config()
+            cfg["actions"][0]["label"] = value
+            b.Controller(cfg)
+        for value in (None, False, 1, []):
+            cfg = config()
+            cfg["actions"][0]["label"] = value
+            with self.assertRaisesRegex(b.ControlError, "action label"):
+                b.Controller(cfg)
+
+    def test_failure_snapshot_does_not_hide_original_error(self):
+        output = io.StringIO()
+        with patch.object(sys, "argv", ["backend", "--config-json", json.dumps(config()), "invoke", "unknown"]), patch.object(b.Controller, "snapshot", side_effect=b.ControlError("Snapshot failed")), patch.object(sys, "stdout", output):
+            self.assertEqual(b.main(), 1)
+        snapshot = json.loads(output.getvalue())
+        self.assertEqual(snapshot["errors"], {"request": "Unknown configured action", "snapshot": "Snapshot failed"})
+        self.assertEqual(len(snapshot["controls"]), 7)
+        self.assertTrue(all(row["kind"] == "unavailable" for row in snapshot["controls"]))
+        self.assertFalse(self.writes.exists())
+
+    def test_bad_json_has_no_snapshot_or_device_io(self):
+        output = io.StringIO()
+        with patch.object(sys, "argv", ["backend", "--config-json", "{", "status"]), patch.object(b, "device_lock") as lock, patch.object(sys, "stdout", output):
+            self.assertEqual(b.main(), 1)
+        snapshot = json.loads(output.getvalue())
+        self.assertEqual(snapshot["controls"], [])
+        self.assertTrue(snapshot["errors"]["request"])
+        lock.assert_not_called()
 
     def test_shell_metacharacters_are_never_interpreted(self):
         cfg = config()

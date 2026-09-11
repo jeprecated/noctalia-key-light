@@ -59,6 +59,7 @@ def run():
             cfg["devices"].append({"id": "light", "type": "key-light", "url": f"http://127.0.0.1:{server.server_port}/elgato/lights"})
             cfg["controls"] += [{"id": "power", "device": "light", "control": "power"}, {"id": "lightBrightness", "device": "light", "control": "brightness", "step": 5, "powerOnChange": True}, {"id": "lightTemperature", "device": "light", "control": "temperature", "step": 100, "unit": "K", "default": 3200}]
             cfg["actions"] += [{"id": "lightToggle", "control": "power", "operation": "toggle"}, {"id": "lightUp", "control": "lightBrightness", "operation": "adjust", "value": 5}, {"id": "lightDown", "control": "lightBrightness", "operation": "adjust", "value": -5}]
+            cfg["actions"] += [{"id": "lightWarm", "label": "Warm 3200 K", "control": "lightTemperature", "operation": "set", "value": 3200}, {"id": "blankLabel", "label": " \t", "control": "power", "operation": "toggle"}]
             cfg["backendCommand"] = [sys.executable, str(directory / "plugin/backend.py")]
             cfg["pollIntervalMs"] = 60000
             shell = directory / "shell.qml"
@@ -104,12 +105,25 @@ ShellRoot {
       }
       return false
     }
+    function action(name: string, click: bool): bool {
+      const button = root.find(popup.contentItem, "action-" + name)
+      if (!button) return false
+      if (click) button.clicked()
+      return true
+    }
+    function cameraPath(mode: string): void {
+      const settings = JSON.parse(JSON.stringify(root.api.pluginSettings))
+      if (mode === "missing") delete settings.devices[0].path
+      else settings.devices[0].path = mode === "null" ? null : (mode === "empty" ? "" : CAMERA_PATH)
+      root.api.pluginSettings = settings
+      main.refresh()
+    }
     function shared(): bool { return widget.store === main.store }
     function brokenHelper(): void { root.api.pluginSettings = Object.assign({}, root.api.pluginSettings, {backendCommand: ["/no/such/studio-controls-helper"]}); main.refresh() }
     function healthyHelper(): void { root.api.pluginSettings = Object.assign({}, root.api.pluginSettings, {backendCommand: GOOD_BACKEND}); main.refresh() }
   }
 }
-'''.replace("SETTINGS", "(" + json.dumps(cfg) + ")").replace("GOOD_BACKEND", json.dumps(cfg["backendCommand"])))
+'''.replace("SETTINGS", "(" + json.dumps(cfg) + ")").replace("GOOD_BACKEND", json.dumps(cfg["backendCommand"])).replace("CAMERA_PATH", json.dumps(cfg["devices"][0]["path"])))
             env = dict(os.environ, QT_QPA_PLATFORM="offscreen", QML_DISABLE_DISK_CACHE="1", XDG_RUNTIME_DIR=str(directory / "runtime"), XDG_CACHE_HOME=str(directory / "cache"), XDG_CONFIG_HOME=str(directory / "config"), V4L2_CTL=str(ROOT / "tests/fake-v4l2.py"), FAKE_CAMERA_STATE=str(state), FAKE_CAMERA_WRITES=str(writes))
             command = ["quickshell", "-p", str(shell)]
             with (directory / "shell.log").open("w+") as log:
@@ -138,6 +152,41 @@ ShellRoot {
                     assert ipc("test", "rows") == "20"
                     time.sleep(0.3)
                     assert not writes.exists() and not requests, "Opening or binding controls wrote hardware"
+                    assert ipc("test", "action", "lightWarm", "false") == "true"
+                    assert ipc("test", "action", "lightToggle", "false") == "false"
+                    assert ipc("test", "action", "blankLabel", "false") == "false"
+                    for method, args in (("set", ("exposure", "166")), ("set", ("auto", "2")), ("invoke", ("unknown",))):
+                        ipc("plugin:studio-controls", method, *args)
+                        rejected = settled()
+                        assert len(rejected["controls"]) == 20
+                        assert rejected["errors"]["request"]
+                        assert rejected["controls"][1]["value"] == 299
+                        assert rejected["controls"][18]["value"] == 25
+                        assert not writes.exists() and not requests
+                    for mode in ("missing", "null", "empty"):
+                        ipc("test", "cameraPath", mode)
+                        unavailable = settled()
+                        assert "unconfigured" in unavailable["errors"]["camera"]
+                        assert len(unavailable["controls"]) == 20
+                        assert all(row["kind"] == "unavailable" for row in unavailable["controls"][:17])
+                        assert all(row["enabled"] for row in unavailable["controls"][17:])
+                        assert ipc("test", "rows") == "20"
+                        ipc("plugin:studio-controls", "set", "auto", "1")
+                        assert settled()["errors"]["request"]
+                        assert not writes.exists() and not requests
+                    ipc("test", "cameraPath", "configured")
+                    assert not settled()["errors"]
+                    # A disconnected configured camera is different from missing configuration.
+                    offline_state = state.with_suffix(".offline")
+                    state.rename(offline_state)
+                    ipc("plugin:studio-controls", "refresh")
+                    assert settled()["controls"][0]["kind"] == "unavailable"
+                    assert ipc("test", "rows") == "20"
+                    offline_state.rename(state)
+                    ipc("plugin:studio-controls", "refresh")
+                    assert not settled()["errors"]
+                    ipc("test", "rows")
+                    assert not writes.exists() and not requests, "Reconnect wrote hardware"
                     assert ipc("test", "activate", "reset-exposure", "") == "false", "Inactive exposure reset enabled"
                     assert ipc("test", "activate", "switch-auto", "0") == "true"
                     snapshot = settled()
@@ -176,6 +225,12 @@ ShellRoot {
                     ipc("plugin:studio-controls", "invoke", "lightUp")
                     settled()
                     assert requests[-1] == {"brightness": 25, "on": 1}
+                    assert light["temperature"] == 222
+                    assert ipc("test", "action", "lightWarm", "true") == "true"
+                    warm = settled()
+                    assert requests[-1] == {"temperature": 312}
+                    assert light["brightness"] == 25 and light["on"] == 1
+                    assert warm["controls"][19]["value"] == round(1000000 / 312)
                     before = len(requests), len(writes.read_text().splitlines())
                     ipc("test", "close")
                     ipc("test", "open")

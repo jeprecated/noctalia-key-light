@@ -66,7 +66,7 @@ def validate(config):
     for device in devices.values():
         if device.get("type") == "v4l2":
             path = device.get("path")
-            if not isinstance(path, str) or not path.startswith("/dev/") or "\x00" in path:
+            if path not in (None, "") and (not isinstance(path, str) or not path.startswith("/dev/") or "\x00" in path):
                 raise ControlError("Camera requires an absolute /dev/ path")
         elif device.get("type") == "key-light":
             url = urllib.parse.urlsplit(device.get("url", ""))
@@ -104,6 +104,8 @@ def validate(config):
             if controls[relation["control"]].get("device") != control["device"]:
                 raise ControlError("Cross-device automatic dependencies are unsupported")
     for action in config["actions"]:
+        if "label" in action and not isinstance(action["label"], str):
+            raise ControlError("Invalid action label")
         if action.get("control") not in controls or action.get("operation") not in ("set", "adjust", "toggle", "reset"):
             raise ControlError("Invalid configured action")
         if action["operation"] in ("set", "adjust"):
@@ -236,7 +238,13 @@ def light_request(device, values=None):
         raise ControlError("Key Light unavailable or invalid response") from error
 
 
+def require_configured(device):
+    if device["type"] == "v4l2" and device.get("path") in (None, ""):
+        raise ControlError("Camera unconfigured: provide an explicit /dev/ path")
+
+
 def discover(device):
+    require_configured(device)
     if device["type"] == "v4l2":
         return parse_controls(v4l2(device, "--list-ctrls-menus"))
     light = light_request(device)
@@ -249,6 +257,7 @@ def discover(device):
 
 @contextlib.contextmanager
 def device_lock(device):
+    require_configured(device)
     directory = Path(os.environ.get("XDG_RUNTIME_DIR", tempfile.gettempdir())) / f"studio-controls-{os.getuid()}"
     directory.mkdir(mode=0o700, exist_ok=True)
     if directory.is_symlink() or directory.stat().st_uid != os.getuid() or directory.stat().st_mode & 0o077:
@@ -324,6 +333,7 @@ class Controller:
         values, errors = {}, {}
         for name, device in self.devices.items():
             try:
+                require_configured(device)
                 with device_lock(device):
                     values[name] = discover(device)
             except (ControlError, OSError) as error:
@@ -336,6 +346,7 @@ class Controller:
             raise ControlError("Unknown configured control")
         control = self.controls[control_id]
         device = self.devices[control["device"]]
+        require_configured(device)
         with device_lock(device):
             all_meta = {control["device"]: discover(device)}
             relation = control.get("enabledWhen")
@@ -396,6 +407,7 @@ def main():
     parser.add_argument("command", choices=("status", "label", "invoke", "set", "adjust", "reset"))
     parser.add_argument("arguments", nargs="*")
     args = parser.parse_args()
+    controller = None
     try:
         if args.config:
             with open(args.config) as handle:
@@ -427,7 +439,15 @@ def main():
         if args.command == "label":
             print("Studio Controls\nUnavailable")
         else:
-            print(json.dumps({"controls": [], "errors": {"request": str(error)}}))
+            snapshot = {"controls": [], "errors": {}}
+            if controller is not None:
+                try:
+                    snapshot = controller.snapshot()
+                except (ControlError, OSError, ValueError, TypeError) as snapshot_error:
+                    snapshot = {"controls": [controller.row(c, {}) for c in controller.controls.values()],
+                                "errors": {"snapshot": str(snapshot_error)}}
+            snapshot["errors"]["request"] = str(error)
+            print(json.dumps(snapshot))
         return 1
 
 

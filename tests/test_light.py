@@ -1,13 +1,16 @@
+import copy
 import json
 import os
 from pathlib import Path
 import tempfile
+import subprocess
+import sys
 import threading
 import time
 import unittest
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from unittest.mock import patch
-from test_backend import b
+from test_backend import ROOT, b, config
 
 
 class LightTests(unittest.TestCase):
@@ -72,6 +75,59 @@ class LightTests(unittest.TestCase):
         self.server.server_close()
         self.env.stop()
         self.temp.cleanup()
+
+    def test_unconfigured_camera_never_locks_or_invokes_v4l2_and_light_works(self):
+        for path in ({}, {"path": None}, {"path": ""}):
+            with self.subTest(path=path):
+                cfg = copy.deepcopy(self.config)
+                cfg["devices"].append({"id": "camera", "type": "v4l2", **path})
+                cfg["controls"] += config()["controls"]
+                ctl = b.Controller(cfg)
+                with patch.object(b, "v4l2") as camera, patch.object(b, "device_lock", wraps=b.device_lock) as lock:
+                    snapshot = ctl.snapshot()
+                    self.assertIn("unconfigured", snapshot["errors"]["camera"])
+                    self.assertTrue(all(row["enabled"] for row in snapshot["controls"][:3]))
+                    self.assertTrue(all(row["kind"] == "unavailable" for row in snapshot["controls"][3:]))
+                    with self.assertRaisesRegex(b.ControlError, "unconfigured"):
+                        ctl.operate("auto", "set", 1)
+                    with self.assertRaisesRegex(b.ControlError, "unconfigured"):
+                        b.discover(cfg["devices"][1])
+                    self.assertEqual(self.writes, [])
+                    ctl.operate("brightness", "adjust", 5)
+                    self.assertEqual(len(self.writes), 1)
+                    self.assertEqual(self.light["temperature"], 222)
+                    self.writes.clear()
+                    camera.assert_not_called()
+                    self.assertTrue(all(call.args[0]["id"] == "light" for call in lock.call_args_list))
+
+    def test_cli_failed_operations_preserve_mixed_snapshot_without_writes(self):
+        cfg = copy.deepcopy(self.config)
+        cfg["devices"] += config()["devices"]
+        cfg["controls"] += config()["controls"]
+        state = Path(self.temp.name) / "camera.json"
+        state.write_text("{}")
+        writes = Path(self.temp.name) / "camera-writes"
+        env = dict(os.environ, V4L2_CTL=str(ROOT / "tests/fake-v4l2.py"), FAKE_CAMERA_STATE=str(state), FAKE_CAMERA_WRITES=str(writes))
+        for command in (["adjust", "exposure", "10"], ["set", "auto", "2"], ["invoke", "unknown"]):
+            result = subprocess.run([sys.executable, str(ROOT / "studio-controls/backend.py"), "--config-json", json.dumps(cfg), *command], env=env, text=True, capture_output=True, timeout=15)
+            self.assertEqual(result.returncode, 1, result.stderr)
+            snapshot = json.loads(result.stdout)
+            self.assertTrue(snapshot["errors"]["request"])
+            self.assertEqual(len(snapshot["controls"]), 10)
+            self.assertEqual(snapshot["controls"][1]["value"], 25)
+            self.assertEqual(snapshot["controls"][4]["value"], 299)
+            self.assertEqual(self.writes, [])
+            self.assertFalse(writes.exists())
+        for path in ({}, {"path": None}, {"path": ""}):
+            cfg["devices"][1] = {"id": "camera", "type": "v4l2", **path}
+            for command in (["status"], ["set", "auto", "1"], ["adjust", "brightness", "0"]):
+                result = subprocess.run([sys.executable, str(ROOT / "studio-controls/backend.py"), "--config-json", json.dumps(cfg), *command], env=env, text=True, capture_output=True, timeout=15)
+                self.assertEqual(result.returncode, 1 if command[0] == "set" else 0, result.stderr)
+                snapshot = json.loads(result.stdout)
+                self.assertIn("unconfigured", snapshot["errors"]["camera"])
+                self.assertEqual(len(snapshot["controls"]), 10)
+                self.assertEqual(snapshot["controls"][1]["value"], 25)
+                self.assertFalse(writes.exists())
 
     def test_readonly_does_not_apply_defaults(self):
         self.assertEqual(len(self.controller.snapshot()["controls"]), 3)

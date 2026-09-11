@@ -43,6 +43,11 @@ personal USB serials, hostnames or preferred presets in this repository.
 | `actions` | Named explicit single-control operations, described below; no implicit actions |
 | `bar` | Optional `rightClickAction`, `scrollUpAction`, `scrollDownAction` referencing configured action IDs |
 
+An omitted, `null` or empty V4L2 `path` means explicitly unconfigured: its controls
+show unavailable with a device error, without locking or invoking V4L2. Other
+devices remain usable. Nonempty paths must start with `/dev/`; there is no automatic
+device selection or fallback.
+
 Left click always opens/closes the popup. Other bar interactions do nothing unless
 configured. Both Noctalia and Stream Deck can invoke the same configured actions.
 IDs must start with an ASCII letter, followed by letters, digits, `_` or `-`.
@@ -82,7 +87,10 @@ Light hardware ranges are power 0/1, brightness 0–100 and colour temperature
 2900–7000 Kelvin; the protocol's reciprocal-temperature rounding means actual
 readback may differ slightly from requested Kelvin values.
 
-Each action is `{id,control,operation,value?}`. Operations are `set`, `adjust`,
+Each action is `{id,control,operation,value?,label?}`. An optional nonblank string
+`label` renders an explicit popup button invoking that action's ID. Unlabeled
+actions remain available through CLI/IPC/bar bindings without extra buttons;
+labels never cause automatic invocation. Operations are `set`, `adjust`,
 `toggle`, `reset`; `set`/`adjust` require an integer `value`. `adjust` performs a
 fresh locked read-modify-write and clamps/quantizes at device limits. `set` rejects
 invalid ranges/steps/menu holes rather than silently substituting a value.
@@ -122,7 +130,10 @@ supply secrets in plugin settings. Helpers use argv, never shell interpolation.
 Each external camera call/light request and lock acquisition is bounded to three
 seconds; failed writes are never retried implicitly. Writes are read back; device
 state, not optimistic GUI state, owns feedback. QML serializes actions with a
-bounded queue, and device locks cover concurrent CLI callers.
+bounded queue, and device locks cover concurrent CLI callers. Rejected operations
+return a nonzero exit status and a fresh read-only snapshot with `errors.request`,
+so the panel retains its controls and current state. Invalid configuration has no
+usable snapshot and returns empty controls with an explicit request error.
 
 ## Migration from Key Light
 

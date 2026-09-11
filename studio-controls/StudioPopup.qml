@@ -61,6 +61,15 @@ PopupWindow {
               ControlRow { control: modelData; store: root.store }
             }
           }
+          Repeater {
+            model: (root.store?.settings?.actions ?? []).filter(action => typeof action.label === "string" && action.label.trim() !== "")
+            Button {
+              required property var modelData
+              objectName: "action-" + modelData.id
+              text: modelData.label
+              onClicked: root.store.invoke(modelData.id)
+            }
+          }
           Text {
             text: Object.values(root.store?.errors ?? ({})).join("\n")
             visible: text !== ""

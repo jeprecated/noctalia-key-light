@@ -8,7 +8,7 @@ Column {
   width: parent ? parent.width : 400
   spacing: 4
   readonly property bool adjustable: control.enabled === true
-  readonly property bool switchControl: control.kind === "bool" || (control.toggleValues && control.toggleValues.length === 2)
+  readonly property bool switchControl: control.kind === "bool" || (!!control.toggleValues && control.toggleValues.length === 2)
 
   function submittedValue(position) {
     const raw = control.slider === "log" ? Math.exp(position) : position
